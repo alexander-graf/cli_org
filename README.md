@@ -7,7 +7,7 @@ CLI Organizer ist eine Rust-basierte Anwendung, die eine grafische Benutzeroberf
 - **Manpage-Anzeige**: Zeigen Sie die Manpage des ausgewählten Befehls an.
 - **Freitextsuche in Manpages**: Suchen Sie innerhalb der angezeigten Manpage nach einem bestimmten Text.
 - **Scroll-Funktionen**: Scrollen Sie schnell zum Anfang oder Ende der Manpage.
-- **Holen aller Anwendungen des Systems**: Die Anwendung holt automatisch alle verfügbaren CLI-Befehle des Systems.
+- **Holen aller Anwendungen des Systems**: Die Anwendung verwendet den `compgen`-Befehl, um automatisch alle verfügbaren CLI-Befehle des Linux-Systems zu holen.
 
 ## Nutzung:
 1. Starten Sie die Anwendung.
@@ -27,7 +27,7 @@ CLI Organizer is a Rust-based application that provides a graphical user interfa
 - **Manpage Display**: Display the manpage of the selected command.
 - **Free Text Search in Manpages**: Search within the displayed manpage for a specific text.
 - **Scroll Functions**: Quickly scroll to the top or bottom of the manpage.
-- **Fetch All System Applications**: The application automatically fetches all available CLI commands of the system.
+- **Fetch All System Applications**: The application uses the `compgen` command to automatically fetch all available CLI commands of the Linux system.
 
 ## Usage:
 1. Start the application.
