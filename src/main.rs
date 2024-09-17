@@ -16,6 +16,7 @@ struct MyApp {
     selected_command: Option<String>,
     manpage: String,
     search_query: String,
+    scroll_to_top: bool,
 }
 
 impl MyApp {
@@ -27,6 +28,7 @@ impl MyApp {
             selected_command: None,
             manpage: String::new(),
             search_query: String::new(),
+            scroll_to_top: false,
         }
     }
 
@@ -41,6 +43,34 @@ impl MyApp {
         }
         self.filtered_commands.sort_by_key(|cmd| cmd.len());
     }
+
+    fn select_next(&mut self) {
+        if let Some(selected) = &self.selected_command {
+            if let Some(index) = self.filtered_commands.iter().position(|cmd| cmd == selected) {
+                if index + 1 < self.filtered_commands.len() {
+                    self.selected_command = Some(self.filtered_commands[index + 1].clone());
+                    self.manpage = get_manpage(&self.filtered_commands[index + 1]);
+                }
+            }
+        } else if !self.filtered_commands.is_empty() {
+            self.selected_command = Some(self.filtered_commands[0].clone());
+            self.manpage = get_manpage(&self.filtered_commands[0]);
+        }
+    }
+
+    fn select_previous(&mut self) {
+        if let Some(selected) = &self.selected_command {
+            if let Some(index) = self.filtered_commands.iter().position(|cmd| cmd == selected) {
+                if index > 0 {
+                    self.selected_command = Some(self.filtered_commands[index - 1].clone());
+                    self.manpage = get_manpage(&self.filtered_commands[index - 1]);
+                }
+            }
+        } else if !self.filtered_commands.is_empty() {
+            self.selected_command = Some(self.filtered_commands[0].clone());
+            self.manpage = get_manpage(&self.filtered_commands[0]);
+        }
+    }
 }
 
 impl eframe::App for MyApp {
@@ -52,17 +82,32 @@ impl eframe::App for MyApp {
                 ui.label("Suche:");
                 if ui.text_edit_singleline(&mut self.search_query).changed() {
                     self.filter_commands();
+                    self.scroll_to_top = true;
                 }
             });
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for command in &self.filtered_commands {
-                    if ui.selectable_label(self.selected_command.as_ref() == Some(command), command).clicked() {
-                        self.selected_command = Some(command.clone());
-                        self.manpage = get_manpage(command);
+            let scroll_area = egui::ScrollArea::vertical();
+            if self.scroll_to_top {
+                scroll_area.show(ui, |ui| {
+                    ui.scroll_to_cursor(Some(egui::Align::TOP));
+                    for command in &self.filtered_commands {
+                        if ui.selectable_label(self.selected_command.as_ref() == Some(command), command).clicked() {
+                            self.selected_command = Some(command.clone());
+                            self.manpage = get_manpage(command);
+                        }
                     }
-                }
-            });
+                });
+                self.scroll_to_top = false;
+            } else {
+                scroll_area.show(ui, |ui| {
+                    for command in &self.filtered_commands {
+                        if ui.selectable_label(self.selected_command.as_ref() == Some(command), command).clicked() {
+                            self.selected_command = Some(command.clone());
+                            self.manpage = get_manpage(command);
+                        }
+                    }
+                });
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -74,6 +119,15 @@ impl eframe::App for MyApp {
                     ui.label(&self.manpage);
                 }
             });
+        });
+
+        ctx.input(|i| {
+            if i.key_pressed(egui::Key::ArrowDown) {
+                self.select_next();
+            }
+            if i.key_pressed(egui::Key::ArrowUp) {
+                self.select_previous();
+            }
         });
     }
 }
