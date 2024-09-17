@@ -1,6 +1,14 @@
 use std::process::Command;
+use eframe::egui;
+use egui::{text::LayoutJob, FontId, TextFormat, Align};
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{ThemeSet, Style};
+use syntect::parsing::SyntaxSet;
+use syntect::util::LinesWithEndings;
+use log::{error, debug};
 
 fn main() {
+    env_logger::init();
     let options = eframe::NativeOptions::default();
     eframe::run_native(
         "CLI Organizer",
@@ -17,6 +25,7 @@ struct MyApp {
     manpage: String,
     search_query: String,
     scroll_to_top: bool,
+    scroll_to_bottom: bool,
 }
 
 impl MyApp {
@@ -29,6 +38,7 @@ impl MyApp {
             manpage: String::new(),
             search_query: String::new(),
             scroll_to_top: false,
+            scroll_to_bottom: false,
         }
     }
 
@@ -45,30 +55,53 @@ impl MyApp {
     }
 
     fn select_next(&mut self) {
+        let mut update_needed = false;
         if let Some(selected) = &self.selected_command {
             if let Some(index) = self.filtered_commands.iter().position(|cmd| cmd == selected) {
                 if index + 1 < self.filtered_commands.len() {
                     self.selected_command = Some(self.filtered_commands[index + 1].clone());
-                    self.manpage = get_manpage(&self.filtered_commands[index + 1]);
+                    update_needed = true;
                 }
             }
         } else if !self.filtered_commands.is_empty() {
             self.selected_command = Some(self.filtered_commands[0].clone());
-            self.manpage = get_manpage(&self.filtered_commands[0]);
+            update_needed = true;
+        }
+        if update_needed {
+            if let Some(command) = &self.selected_command {
+                self.update_manpage(&command.clone());
+            }
         }
     }
 
     fn select_previous(&mut self) {
+        let mut update_needed = false;
         if let Some(selected) = &self.selected_command {
             if let Some(index) = self.filtered_commands.iter().position(|cmd| cmd == selected) {
                 if index > 0 {
                     self.selected_command = Some(self.filtered_commands[index - 1].clone());
-                    self.manpage = get_manpage(&self.filtered_commands[index - 1]);
+                    update_needed = true;
                 }
             }
         } else if !self.filtered_commands.is_empty() {
             self.selected_command = Some(self.filtered_commands[0].clone());
-            self.manpage = get_manpage(&self.filtered_commands[0]);
+            update_needed = true;
+        }
+        if update_needed {
+            if let Some(command) = &self.selected_command {
+                self.update_manpage(&command.clone());
+            }
+        }
+    }
+
+    fn update_manpage(&mut self, command: &str) {
+        match get_manpage(command) {
+            Ok(manpage) => {
+                self.manpage = manpage;
+                self.scroll_to_top = true;
+                self.scroll_to_bottom = false;
+            },
+            Err(e) => error!("Failed to fetch manpage: {}", e),
         }
     }
 }
@@ -82,41 +115,64 @@ impl eframe::App for MyApp {
                 ui.label("Suche:");
                 if ui.text_edit_singleline(&mut self.search_query).changed() {
                     self.filter_commands();
-                    self.scroll_to_top = true;
                 }
             });
 
             let scroll_area = egui::ScrollArea::vertical();
-            if self.scroll_to_top {
-                scroll_area.show(ui, |ui| {
-                    ui.scroll_to_cursor(Some(egui::Align::TOP));
-                    for command in &self.filtered_commands {
-                        if ui.selectable_label(self.selected_command.as_ref() == Some(command), command).clicked() {
-                            self.selected_command = Some(command.clone());
-                            self.manpage = get_manpage(command);
-                        }
+            scroll_area.show(ui, |ui| {
+                for command in self.filtered_commands.clone() {
+                    if ui.selectable_label(self.selected_command.as_ref() == Some(&command), &command).clicked() {
+                        self.selected_command = Some(command.clone());
+                        self.update_manpage(&command);
                     }
-                });
-                self.scroll_to_top = false;
-            } else {
-                scroll_area.show(ui, |ui| {
-                    for command in &self.filtered_commands {
-                        if ui.selectable_label(self.selected_command.as_ref() == Some(command), command).clicked() {
-                            self.selected_command = Some(command.clone());
-                            self.manpage = get_manpage(command);
-                        }
-                    }
-                });
-            }
+                }
+            });
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Manpage");
-            egui::ScrollArea::vertical().show(ui, |ui| {
+
+            ui.horizontal(|ui| {
+                if ui.button("⬆ Scroll to Top").clicked() {
+                    self.scroll_to_top = true;
+                    self.scroll_to_bottom = false;
+                }
+                if ui.button("⬇ Scroll to Bottom").clicked() {
+                    self.scroll_to_bottom = true;
+                    self.scroll_to_top = false;
+                }
+            });
+
+            let mut scroll_area = egui::ScrollArea::vertical().id_source("manpage_scroll_area");
+            
+            if self.scroll_to_top {
+                scroll_area = scroll_area.vertical_scroll_offset(0.0);
+                self.scroll_to_top = false;
+            }
+
+            scroll_area.show(ui, |ui| {
                 if self.manpage.is_empty() {
                     ui.label("Nicht verfügbar");
                 } else {
-                    ui.label(&self.manpage);
+                    let syntax_set = SyntaxSet::load_defaults_newlines();
+                    let theme_set = ThemeSet::load_defaults();
+                    let syntax = syntax_set.find_syntax_plain_text();
+                    let mut h = HighlightLines::new(syntax, &theme_set.themes["base16-ocean.dark"]);
+
+                    let mut job = LayoutJob::default();
+                    for line in LinesWithEndings::from(&self.manpage) {
+                        let ranges: Vec<(Style, &str)> = h.highlight_line(line, &syntax_set).unwrap();
+                        for (style, text) in ranges {
+                            let color = egui::Color32::from_rgb(style.foreground.r, style.foreground.g, style.foreground.b);
+                            job.append(text, 0.0, TextFormat::simple(FontId::default(), color));
+                        }
+                    }
+                    ui.label(job);
+
+                    if self.scroll_to_bottom {
+                        ui.scroll_to_cursor(Some(Align::BOTTOM));
+                        self.scroll_to_bottom = false;
+                    }
                 }
             });
         });
@@ -139,13 +195,21 @@ fn get_cli_commands() -> Vec<String> {
         .output()
         .expect("Failed to execute command");
     let commands = String::from_utf8_lossy(&output.stdout);
-    commands.lines().map(|s| s.to_string()).collect()
+    let result: Vec<String> = commands.lines().map(|s| s.to_string()).collect();
+    debug!("Fetched {} CLI commands", result.len());
+    result
 }
 
-fn get_manpage(command: &str) -> String {
+fn get_manpage(command: &str) -> Result<String, std::io::Error> {
+    debug!("Fetching manpage for command: {}", command);
     let output = Command::new("man")
         .arg(command)
-        .output()
-        .expect("Failed to execute command");
-    String::from_utf8_lossy(&output.stdout).to_string()
+        .output()?;
+    
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let error = String::from_utf8_lossy(&output.stderr);
+        Err(std::io::Error::new(std::io::ErrorKind::Other, error.to_string()))
+    }
 }
