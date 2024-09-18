@@ -7,6 +7,8 @@ use syntect::highlighting::{ThemeSet, Style};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use log::error;
+use webbrowser;
+use urlencoding;
 
 #[derive(Default)]
 pub struct MyApp {
@@ -109,6 +111,16 @@ impl MyApp {
             .collect::<Vec<&str>>()
             .join("\n")
     }
+
+    pub fn open_perplexity_search(&self) {
+        if let Some(command) = &self.selected_command {
+            let query = format!("{} zeige mir beispielanwendungen für diesen befehl", command);
+            let url = format!("https://www.perplexity.ai/search?q={}", urlencoding::encode(&query));
+            if webbrowser::open(&url).is_err() {
+                error!("Failed to open web browser");
+            }
+        }
+    }
 }
 
 impl eframe::App for MyApp {
@@ -132,6 +144,12 @@ impl eframe::App for MyApp {
                     }
                 }
             });
+        });
+
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+            if ui.button("Beispiel").clicked() {
+                self.open_perplexity_search();
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
