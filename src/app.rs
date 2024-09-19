@@ -1,7 +1,7 @@
 use crate::cli::get_cli_commands;
 use crate::manpage::get_manpage;
 use eframe::egui;
-use egui::{text::LayoutJob, FontId, TextFormat, Align};
+use egui::{text::LayoutJob, FontId, TextFormat};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{ThemeSet, Style};
 use syntect::parsing::SyntaxSet;
@@ -46,6 +46,17 @@ impl MyApp {
         app
     }
 
+    pub fn clear_history(&mut self) {
+        self.command_history.clear();
+        if let Some(config_dir) = dirs::config_dir() {
+            let path = config_dir.join("cli_organizer_history.json");
+            if path.exists() {
+                let _ = fs::remove_file(path);
+            }
+        }
+        self.save_command_history(); // Dies erstellt die Datei neu
+    }
+
     pub fn filter_commands(&mut self) {
         if self.search_query.is_empty() {
             self.filtered_commands = self.commands.clone();
@@ -55,13 +66,21 @@ impl MyApp {
                 .cloned()
                 .collect();
         }
+
         self.filtered_commands.sort_by_key(|cmd| cmd.len());
+
+        if !self.filtered_commands.is_empty() {
+            let first_command = self.filtered_commands[0].clone();
+            self.selected_command = Some(first_command.clone());
+            self.scroll_to_selected = true;
+            self.update_manpage(&first_command);
+        }
     }
 
     pub fn select_command(&mut self, command: &str) {
         self.selected_command = Some(command.to_string());
         self.update_manpage(command);
-        self.add_to_history(command);
+        // Die Methode update_manpage kümmert sich jetzt um das Hinzufügen zur History
         self.scroll_to_selected = true;
     }
 
@@ -96,25 +115,33 @@ impl MyApp {
     pub fn update_manpage(&mut self, command: &str) {
         match get_manpage(command) {
             Ok(manpage) => {
-                self.manpage = manpage;
-                self.scroll_to_top = true;
-                self.scroll_to_bottom = false;
-                
-                // Füge den Befehl zur History hinzu, wenn er noch nicht vorhanden ist
-                if !self.command_history.contains(&command.to_string()) {
-                    self.command_history.push(command.to_string());
-                    self.save_command_history(); // Speichere die aktualisierte History
+                if !manpage.is_empty() {
+                    self.manpage = manpage;
+                    self.scroll_to_top = true;
+                    self.scroll_to_bottom = false;
+                    // Füge den Befehl zur History hinzu, nur wenn eine Manpage verfügbar ist
+                    if !self.command_history.contains(&command.to_string()) {
+                        self.command_history.push(command.to_string());
+                        self.save_command_history(); // Speichere die aktualisierte History
+                    }
+                } else {
+                    self.manpage = String::from("Nicht verfügbar");
+                    // Hier wird der Befehl nicht zur History hinzugefügt
                 }
             },
-            Err(e) => error!("Failed to fetch manpage: {}", e),
+            Err(e) => {
+                error!("Failed to fetch manpage: {}", e);
+                self.manpage = String::from("Nicht verfügbar");
+                // Hier wird der Befehl ebenfalls nicht zur History hinzugefügt
+            },
         }
     }
-    
 
     pub fn filter_manpage(&self) -> String {
         if self.manpage_search_query.is_empty() {
             return self.manpage.clone();
         }
+
         self.manpage
             .lines()
             .filter(|line| line.contains(&self.manpage_search_query))
@@ -171,19 +198,22 @@ impl eframe::App for MyApp {
                 }
             });
             let scroll_area = egui::ScrollArea::vertical();
+            let mut selected = None;
             scroll_area.show(ui, |ui| {
-                for command in self.filtered_commands.clone() {
-                    let is_selected = self.selected_command.as_ref() == Some(&command);
-                    if ui.selectable_label(is_selected, &command).clicked() {
-                        self.selected_command = Some(command.clone());
-                        self.update_manpage(&command);
+                for command in self.filtered_commands.iter() {
+                    let is_selected = self.selected_command.as_ref() == Some(command);
+                    if ui.selectable_label(is_selected, command).clicked() {
+                        selected = Some(command.clone());
                     }
                     if is_selected && self.scroll_to_selected {
-                        ui.scroll_to_cursor(Some(Align::Center));
+                        ui.scroll_to_cursor(Some(egui::Align::Center));
                         self.scroll_to_selected = false;
                     }
                 }
             });
+            if let Some(command) = selected {
+                self.select_command(&command);
+            }
         });
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -215,7 +245,9 @@ impl eframe::App for MyApp {
                     self.scroll_to_bottom = false;
                 }
             });
-            let mut scroll_area = egui::ScrollArea::vertical().id_source("manpage_scroll_area");
+            let mut scroll_area = egui::ScrollArea::vertical()
+                .id_source("manpage_scroll_area")
+                .auto_shrink([false; 2]);
             if self.scroll_to_top {
                 scroll_area = scroll_area.vertical_scroll_offset(0.0);
                 self.scroll_to_top = false;
@@ -238,40 +270,57 @@ impl eframe::App for MyApp {
                         }
                     }
                     ui.label(job);
+                    ui.add_space(20.0); // Fügt 20px Padding am unteren Rand hinzu
                     if self.scroll_to_bottom {
-                        ui.scroll_to_cursor(Some(Align::BOTTOM));
+                        ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
                         self.scroll_to_bottom = false;
                     }
                 }
             });
         });
 
-        egui::SidePanel::right("history_panel").resizable(false).min_width(150.0).show(ctx, |ui| {
-            ui.heading("Historie");
-            
-            let mut selected_command = None;
-            
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .max_height(f32::INFINITY)
-                .show(ui, |ui| {
-                    ui.set_min_height(ui.available_height());
-                    for command in &self.command_history {
-                        if ui.button(command).clicked() {
-                            selected_command = Some(command.clone());
+        let history_height = ((self.command_history.len() as f32 / 10.0).ceil() * 30.0).max(100.0);
+
+        egui::TopBottomPanel::bottom("history_panel")
+            .resizable(false)
+            .min_height(history_height)
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(ui.style().visuals.extreme_bg_color)
+                    .show(ui, |ui| {
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.heading("Historie");
+                            if ui.button("Löschen").clicked() {
+                                self.clear_history();
+                            }
+                        });
+                        ui.add_space(5.0);
+                        
+                        let mut selected_command = None;
+                        egui::Grid::new("history_grid")
+                            .num_columns(10)
+                            .spacing([5.0, 5.0])
+                            .show(ui, |ui| {
+                                for (index, command) in self.command_history.iter().enumerate() {
+                                    if ui.button(command).clicked() {
+                                        selected_command = Some(command.clone());
+                                    }
+                                    if (index + 1) % 10 == 0 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+
+                        if let Some(command) = selected_command {
+                            self.select_command(&command);
+                            self.search_query.clear();
+                            self.filter_commands();
                         }
-                    }
-                });
-        
-            if let Some(command) = selected_command {
-                self.selected_command = Some(command.clone());
-                self.update_manpage(&command);
-                self.search_query.clear();
-                self.filter_commands();
-                self.scroll_to_selected = true;
-            }
-        });
-        
+
+                        ui.add_space(10.0);
+                    });
+            });
 
         ctx.input(|i| {
             if i.key_pressed(egui::Key::ArrowDown) {
@@ -283,4 +332,5 @@ impl eframe::App for MyApp {
         });
     }
 }
+
 
