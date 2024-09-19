@@ -179,18 +179,16 @@ impl MyApp {
         }
     }
 
-    fn add_to_history(&mut self, command: &str) {
-        if !self.command_history.contains(&command.to_string()) {
-            self.command_history.push(command.to_string());
-            self.save_command_history();
-        }
-    }
+  
 }
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            ui.heading("Programme");
+            ui.horizontal(|ui| {
+                ui.heading("Programme:");
+                ui.label(format!("{} Befehle", self.filtered_commands.len()));
+            });
             ui.horizontal(|ui| {
                 ui.label("Suche:");
                 if ui.text_edit_singleline(&mut self.search_query).changed() {
@@ -198,12 +196,12 @@ impl eframe::App for MyApp {
                 }
             });
             let scroll_area = egui::ScrollArea::vertical();
-            let mut selected = None;
+            let mut selected_command = None;
             scroll_area.show(ui, |ui| {
                 for command in self.filtered_commands.iter() {
                     let is_selected = self.selected_command.as_ref() == Some(command);
                     if ui.selectable_label(is_selected, command).clicked() {
-                        selected = Some(command.clone());
+                        selected_command = Some(command.clone());
                     }
                     if is_selected && self.scroll_to_selected {
                         ui.scroll_to_cursor(Some(egui::Align::Center));
@@ -211,11 +209,11 @@ impl eframe::App for MyApp {
                     }
                 }
             });
-            if let Some(command) = selected {
-                self.select_command(&command);
+            if let Some(command) = selected_command {
+                self.update_manpage(&command);
+                self.selected_command = Some(command);
             }
         });
-
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             if let Some(command) = &self.selected_command {
                 if ui.button(format!("Example Usage for {}", command)).clicked() {
