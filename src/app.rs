@@ -99,10 +99,17 @@ impl MyApp {
                 self.manpage = manpage;
                 self.scroll_to_top = true;
                 self.scroll_to_bottom = false;
+                
+                // Füge den Befehl zur History hinzu, wenn er noch nicht vorhanden ist
+                if !self.command_history.contains(&command.to_string()) {
+                    self.command_history.push(command.to_string());
+                    self.save_command_history(); // Speichere die aktualisierte History
+                }
             },
             Err(e) => error!("Failed to fetch manpage: {}", e),
         }
     }
+    
 
     pub fn filter_manpage(&self) -> String {
         if self.manpage_search_query.is_empty() {
@@ -244,14 +251,18 @@ impl eframe::App for MyApp {
             
             let mut selected_command = None;
             
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-                for command in &self.command_history {
-                    if ui.button(command).clicked() {
-                        selected_command = Some(command.clone());
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .max_height(f32::INFINITY)
+                .show(ui, |ui| {
+                    ui.set_min_height(ui.available_height());
+                    for command in &self.command_history {
+                        if ui.button(command).clicked() {
+                            selected_command = Some(command.clone());
+                        }
                     }
-                }
-            });
-
+                });
+        
             if let Some(command) = selected_command {
                 self.selected_command = Some(command.clone());
                 self.update_manpage(&command);
@@ -260,6 +271,7 @@ impl eframe::App for MyApp {
                 self.scroll_to_selected = true;
             }
         });
+        
 
         ctx.input(|i| {
             if i.key_pressed(egui::Key::ArrowDown) {
